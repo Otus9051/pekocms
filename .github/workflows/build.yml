@@ -40,13 +40,13 @@ jobs:
         path: setup.iss
 
     - name: Upload Installer Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: PekoCMS-Installer
         path: PekoCMSSetup.exe
         
     - name: Upload Executable Artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: PekoCMS-Executables
         path: dist/*.exe
