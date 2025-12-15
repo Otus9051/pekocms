@@ -12,7 +12,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
 
     - name: Set up Python
       uses: actions/setup-python@v6
@@ -50,3 +50,36 @@ jobs:
       with:
         name: PekoCMS-Executables
         path: dist/*.exe
+    
+    - name: Extract Version from setup.iss
+      id: get_version
+      shell: pwsh
+      run: |
+        $content = Get-Content -Path "setup.iss" -Raw
+        if ($content -match '#define MyAppVersion "([^"]+)"') {
+          $version = $matches[1]
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          echo "Extracted version: $version"
+        } else {
+          echo "Could not find version in setup.iss"
+          exit 1
+        }
+    
+    - name: Create Release
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ steps.get_version.outputs.VERSION }}
+        name: PekoCMS v${{ steps.get_version.outputs.VERSION }}
+        draft: false
+        prerelease: false
+        files: PekoCMSSetup.exe
+        body: |
+          ## PekoCMS v${{ steps.get_version.outputs.VERSION }}
+          
+          Automated release build from commit ${{ github.sha }}
+          
+          ### Installation
+          Download `PekoCMSSetup.exe` and run the installer.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
