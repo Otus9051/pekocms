@@ -10,7 +10,9 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-
+    permissions:
+      contents: write
+      
     steps:
     - uses: actions/checkout@v6
 
@@ -67,13 +69,14 @@ jobs:
     
     - name: Create Release
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      uses: softprops/action-gh-release@v2
+      uses: ncipollo/release-action@v1
       with:
-        tag_name: v${{ steps.get_version.outputs.VERSION }}
+        tag: v${{ steps.get_version.outputs.VERSION }}
         name: PekoCMS v${{ steps.get_version.outputs.VERSION }}
         draft: false
         prerelease: false
-        files: PekoCMSSetup.exe
+        artifacts: PekoCMSSetup.exe
+        allowUpdates: true
         body: |
           ## PekoCMS v${{ steps.get_version.outputs.VERSION }}
           
@@ -81,5 +84,4 @@ jobs:
           
           ### Installation
           Download `PekoCMSSetup.exe` and run the installer.
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.GITHUB_TOKEN }}
