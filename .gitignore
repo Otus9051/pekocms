@@ -1,0 +1,21 @@
+# Logs
+logs
+*.log
+
+dist
+build
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+
+PekoCMSSetup.exe
+proprietary/
+sync_worker.exe
+*/__pycache__
+databases
+invoice_storage

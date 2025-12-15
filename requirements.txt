@@ -1,0 +1,9 @@
+pydantic
+fpdf2
+selenium
+webdriver-manager
+openpyxl
+pyinstaller
+PySide6
+pyyaml
+requests
