@@ -15,6 +15,7 @@ a = Analysis(
     ],
     hiddenimports=[
         'PySide6',
+        'werkzeug.security',
         'db.auth_db',
         'db.patient_cms_db',
         'db.datasheet_db',
