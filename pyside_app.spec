@@ -66,9 +66,6 @@ migration_a = Analysis(
     ['migration_tool.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('databases', 'databases'),
-    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
