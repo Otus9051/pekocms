@@ -671,11 +671,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cat_status.setText('Ready')
         # Connect to tab change event to ensure catalogue is cached
         self.pathology_tabs.currentChanged.connect(self._on_pathology_tab_changed)
+        
+        # Populate special tests table on initialization
+        self.search_special_tests()
     
     def _on_pathology_tab_changed(self, tab_index):
         """Handle pathology tab changes - on-demand loading via search button"""
-        # Tab 0 is invoice, Tab 2 is catalogue
-        # No automatic loading - user will click Search button when needed
+        # No automatic clearing - form clears after invoice generation instead
         pass
     
     def _on_invoice_catalogue_loaded(self, cat, status_msg):
@@ -804,13 +806,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """Query special tests from database on-demand"""
         q = self.cat_search.text().lower().strip()
         
-        if not q:
-            self.special_table.setRowCount(0)
-            return
-        
         try:
-            # Query special tests from SQLite
-            results = special_tests_db.search_special_tests(q)
+            # Query special tests from SQLite (always show all if no query)
+            results = special_tests_db.search_special_tests(q) if q else special_tests_db.get_all_special_tests()
             
             # Display results with batch rendering
             self.special_table.setUpdatesEnabled(False)
@@ -1028,10 +1026,16 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, 'Success', f'Invoice {res["invoice_number"]} created')
             webbrowser.open(f"file://{res['filepath']}")
             
+            # Clear all invoice form data (but preserve catalogue/special tests)
+            self.inv_current_patient = None
+            self.inv_patient_id.clear()
+            self.inv_patient_info.setText('Not Selected')  # Clear patient details display
             self.inv_selected_tests.clear()
             self.update_selected_tests_display()
-            self.inv_patient_id.clear()
-            self.inv_current_patient = None
+            self.inv_home_check.setChecked(False)
+            self.inv_home_fee.setValue(0)
+            self.inv_discount.setValue(0)
+            self.inv_recalc()  # This will update all billing displays
             self.inv_gen_btn.setEnabled(False)
             
             # Refresh datasheet and reports on new invoice
@@ -2503,8 +2507,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Patient queue table
         self.poly_queue_table = QtWidgets.QTableWidget()
-        self.poly_queue_table.setColumnCount(9)
-        self.poly_queue_table.setHorizontalHeaderLabels(QUEUE_TABLE_HEADERS)
+        self.poly_queue_table.setColumnCount(8)
+        self.poly_queue_table.setHorizontalHeaderLabels(QUEUE_TABLE_HEADERS[:-1])  # Exclude 'Delete' column
         right_layout.addWidget(self.poly_queue_table)
         
         # Add panels to main layout
@@ -2626,12 +2630,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 attendance_layout.addWidget(attendance_check)
                 attendance_layout.addStretch()
                 self.poly_queue_table.setCellWidget(r, 7, attendance_container)
-                
-                # Delete button
-                delete_btn = QtWidgets.QPushButton("Delete")
-                delete_btn.setStyleSheet("background-color: #D32F2F; color: white; padding: 4px; font-size: 10px;")
-                delete_btn.clicked.connect(lambda checked, bid=booking['booking_id']: self.poly_delete_booking(bid))
-                self.poly_queue_table.setCellWidget(r, 8, delete_btn)
             
             # Update summary
             if selected_doctor_id:
