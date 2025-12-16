@@ -77,6 +77,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # Initialize polyclinic data storage
         self.polyclinic_data = {'doctors': [], 'bookings': []}
         
+        # Smart Layout Detection
+        screen = QtWidgets.QApplication.primaryScreen()
+        screen_geo = screen.availableGeometry()
+        # If height is small (e.g. 768p), enable compact mode
+        self.compact_mode = screen_geo.height() < 900
+        print(f"Screen Height: {screen_geo.height()}px -> Compact Mode: {self.compact_mode}")
+        
         # Create central widget with header + tabs layout
         central = QtWidgets.QWidget()
         main_layout = QtWidgets.QVBoxLayout(central)
@@ -133,6 +140,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scale_value_label = QtWidgets.QLabel(f'{int(UI_SCALE * 100)}%')
         self.scale_value_label.setStyleSheet('font-size: 11px; font-weight: bold; min-width: 40px;')
         header_layout.addWidget(self.scale_value_label)
+        
+        # Compact Mode Toggle
+        header_layout.addSpacing(10)
+        self.compact_check = QtWidgets.QCheckBox("Compact")
+        self.compact_check.setStyleSheet('font-weight: bold; font-size: 11px;')
+        self.compact_check.setChecked(self.compact_mode)
+        self.compact_check.toggled.connect(self.on_compact_toggled)
+        header_layout.addWidget(self.compact_check)
         
         # User info and logout button
         header_layout.addStretch()
@@ -204,7 +219,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(central)
         
         # Apply initial scale from config
-        self.apply_ui_scale(UI_SCALE)
+        # Smart Auto-Scale: If we are in compact mode (small screen) and user hasn't customized scale (still 1.0),
+        # automatically drop to 0.85 which is the sweet spot for 768p
+        current_s = UI_SCALE
+        if self.compact_mode and current_s == 1.0:
+            print("Auto-scaling to 0.85 for 768p screen")
+            current_s = 0.85
+            # We don't save this to config automatically to avoid overriding user preference persistently if they move screens,
+            # but we update the UI
+            
+        self.apply_ui_scale(current_s)
+        self.scale_slider.setValue(int(current_s * 100)) # Sync slider
         
         # Initialize pathology tabs
         self.init_invoice_tab()
@@ -245,6 +270,58 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scale_value_label.setText(f'{value}%')
         self.apply_ui_scale(scale)
         self.save_scale_to_config(scale)
+
+    def on_compact_toggled(self, checked):
+        """Handle compact mode toggle"""
+        self.compact_mode = checked
+        print(f"Compact Mode toggled: {self.compact_mode}")
+        
+        # Rebuild Invoice Tab
+        # 1. Clear existing layout safely
+        if self.invoice_tab.layout():
+            self.clear_layout(self.invoice_tab.layout())
+            QtWidgets.QWidget().setLayout(self.invoice_tab.layout()) # Hack to unparent layout if needed, but deleteLater usually works
+            # Actually, just deleting the old layout widget items is enough?
+            # layout remains set on the widget. We need to repurpose it or delete it.
+            # self.invoice_tab.layout().deleteLater() # This doesn't remove it immediately
+            
+            # Better approach: Create a new widget for the tab to ensure clean slate?
+            # But the tab widget holds the reference.
+            
+            # Let's use the clear_layout helper and reuse the existing layout instance if possible?
+            # No, standard practice is to delete the layout item.
+            old_layout = self.invoice_tab.layout()
+            self.clear_layout(old_layout)
+            # Remove layout from widget
+            # self.invoice_tab.setLayout(None) # Not supported in PySide
+            
+            # Just create a new container widget for the tab content!
+            # Wait, self.invoice_tab IS the widget in the tab.
+            # Let's just create a new widget and replace the tab.
+            
+            new_tab = QtWidgets.QWidget()
+            # Replace in QTabWidget
+            idx = self.pathology_tabs.indexOf(self.invoice_tab)
+            if idx >= 0:
+                self.pathology_tabs.removeTab(idx)
+                self.invoice_tab = new_tab # Update reference
+                self.pathology_tabs.insertTab(idx, self.invoice_tab, "Invoice Generator")
+                self.pathology_tabs.setCurrentIndex(idx) # Keep focus
+                
+                # Re-init
+                self.init_invoice_tab()
+    
+    def clear_layout(self, layout):
+        """Recursively clear a layout"""
+        if layout is not None:
+            while layout.count():
+                item = layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
+                else:
+                    self.clear_layout(item.layout())
+            layout.deleteLater()
     
     class ResizingGraphicsView(QtWidgets.QGraphicsView):
         def __init__(self, scene, parent=None):
@@ -286,99 +363,101 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def apply_ui_scale(self, scale):
         """Apply UI scale transformation to central widget using QGraphicsView"""
-        # Store the scale for reference
-        self.current_scale = scale
-        
-        # Get the current central widget
-        current_central = self.centralWidget()
-        if not current_central:
-            return
+        try:
+            # Store the scale for reference
+            self.current_scale = scale
             
-        # Check if we are already in scaled mode (current_central is our wrapper)
-        is_already_scaled = isinstance(current_central, MainWindow.ResizingGraphicsView)
-        
-        if scale == 1.0:
-            if is_already_scaled:
-                # Unwrap: Retrieve the original widget
-                proxy = current_central.scene().items()[-1] # Usually items are stacked, check properly
-                # Better: usage referencing existing stored widget
-                if hasattr(self, '_original_central_widget') and self._original_central_widget:
-                    # Restore original - Explicitly reparent to self to ensure ownership is claimed
-                    self.setCentralWidget(self._original_central_widget)
-                    self._original_central_widget.setFixedSize(QtWidgets.QWIDGETSIZE_MAX, QtWidgets.QWIDGETSIZE_MAX) 
-                    self._original_central_widget.updateGeometry()
-                    
-                    # Clean up the graphics view infrastructure
-                    # Important: Proxy widget might try to delete the widget if not carefully detached
-                    # But setCentralWidget reparents it, so it should be fine.
-                    # We'll just be extra careful with exception handling during cleanup
-                    try:
-                        if hasattr(self, 'proxy_widget'):
-                            # Ensure proxy doesn't think it owns the widget anymore (though reparenting should handle this)
-                            pass 
-                        current_central.deleteLater()
-                        if hasattr(self, 'graphics_scene'):
-                             self.graphics_scene.deleteLater()
-                             del self.graphics_scene
-                    except RuntimeError:
-                        pass
-                    
-                    if hasattr(self, 'proxy_widget'):
-                        del self.proxy_widget
+            # Get the current central widget
+            current_central = self.centralWidget()
+            if not current_central:
+                return
+            
+            # Check if we are already in scaled mode (current_central is our wrapper)
+            is_already_scaled = isinstance(current_central, MainWindow.ResizingGraphicsView)
+            
+            if scale == 1.0:
+                if is_already_scaled:
+                    # Unwrap: Retrieve the original widget
+                    proxy = current_central.scene().items()[-1] # Usually items are stacked, check properly
+                    # Better: usage referencing existing stored widget
+                    if hasattr(self, '_original_central_widget') and self._original_central_widget:
+                        try:
+                            # Restore original - Explicitly reparent to self to ensure ownership is claimed
+                            self.setCentralWidget(self._original_central_widget)
+                            # Reset fixed size constraints by setting to default min/max
+                            self._original_central_widget.setMinimumSize(0, 0)
+                            self._original_central_widget.setMaximumSize(16777215, 16777215)
+                            self._original_central_widget.updateGeometry()
+                            
+                            # Clean up the graphics view infrastructure
+                            current_central.deleteLater()
+                            if hasattr(self, 'graphics_scene'):
+                                 self.graphics_scene.deleteLater()
+                                 del self.graphics_scene
+                        except RuntimeError:
+                            # Widget might be deleted during shutdown or scaling update
+                            pass
                         
-                    del self._original_central_widget
-        else:
-            # We want to scale
-            if not is_already_scaled:
-                # FIRST: Detach the original central widget from MainWindow so it can be embedded
-                # takeCentralWidget passes ownership to us
-                self._original_central_widget = self.takeCentralWidget()
-                
-                if not self._original_central_widget:
-                    # Should not happen if we checked centralWidget() before, but safety first
-                    # Attempt to recover by using the reference we got earlier, assuming we can reparent it
-                    # But if takeCentralWidget returned None, we might be in trouble.
-                    self._original_central_widget = current_central
-
-                # Create graphics view setup
-                self.graphics_scene = QtWidgets.QGraphicsScene()
-                self.graphics_view = self.ResizingGraphicsView(self.graphics_scene, self)
-                self.graphics_view.main_window = self
-                
-                # Retrieve background color from original widget or window to fill gaps
-                bg_color = self.palette().color(QtGui.QPalette.Window)
-                self.graphics_view.setBackgroundBrush(bg_color)
-                
-                # Add the original widget as a proxy
-                self.proxy_widget = self.graphics_scene.addWidget(self._original_central_widget)
-                
-                # Set view as central
-                self.setCentralWidget(self.graphics_view)
+                        if hasattr(self, 'proxy_widget'):
+                            del self.proxy_widget
+                            
+                        del self._original_central_widget
             else:
-                # Already scaled, just updating scale factor
-                self.graphics_view = current_central
-                # Find proxy
-                for item in self.graphics_scene.items():
-                    if isinstance(item, QtWidgets.QGraphicsProxyWidget):
-                        self.proxy_widget = item
-                        break
-            
-            # Apply transformation
-            transform = QtGui.QTransform()
-            transform.scale(scale, scale)
-            self.proxy_widget.setTransform(transform)
-            
-            # Force a resize event to layout correctly with new scale
-            # We manually trigger the logic from resizeEvent
-            view_width = self.graphics_view.viewport().width()
-            view_height = self.graphics_view.viewport().height()
-            
-            if view_width > 0 and view_height > 0:
-                new_width = view_width / scale
-                new_height = view_height / scale
-                self._original_central_widget.setFixedSize(int(new_width), int(new_height))
-                # VISUAL size matches viewport
-                self.graphics_scene.setSceneRect(0, 0, view_width, view_height)
+                # We want to scale
+                if not is_already_scaled:
+                    # FIRST: Detach the original central widget from MainWindow so it can be embedded
+                    # takeCentralWidget passes ownership to us
+                    self._original_central_widget = self.takeCentralWidget()
+                    
+                    if not self._original_central_widget:
+                        # Should not happen if we checked centralWidget() before, but safety first
+                        # Attempt to recover by using the reference we got earlier, assuming we can reparent it
+                        # But if takeCentralWidget returned None, we might be in trouble.
+                        self._original_central_widget = current_central
+    
+                    # Create graphics view setup
+                    self.graphics_scene = QtWidgets.QGraphicsScene()
+                    self.graphics_view = self.ResizingGraphicsView(self.graphics_scene, self)
+                    self.graphics_view.main_window = self
+                    
+                    # Retrieve background color from original widget or window to fill gaps
+                    bg_color = self.palette().color(QtGui.QPalette.Window)
+                    self.graphics_view.setBackgroundBrush(bg_color)
+                    
+                    # Add the original widget as a proxy
+                    self.proxy_widget = self.graphics_scene.addWidget(self._original_central_widget)
+                    
+                    # Set view as central
+                    self.setCentralWidget(self.graphics_view)
+                else:
+                    # Already scaled, just updating scale factor
+                    self.graphics_view = current_central
+                    # Find proxy
+                    for item in self.graphics_scene.items():
+                        if isinstance(item, QtWidgets.QGraphicsProxyWidget):
+                            self.proxy_widget = item
+                            break
+                
+                # Apply transformation
+                transform = QtGui.QTransform()
+                transform.scale(scale, scale)
+                self.proxy_widget.setTransform(transform)
+                
+                # Force a resize event to layout correctly with new scale
+                # We manually trigger the logic from resizeEvent
+                view_width = self.graphics_view.viewport().width()
+                view_height = self.graphics_view.viewport().height()
+                
+                if view_width > 0 and view_height > 0:
+                    new_width = view_width / scale
+                    new_height = view_height / scale
+                    self._original_central_widget.setFixedSize(int(new_width), int(new_height))
+                    # VISUAL size matches viewport
+                    self.graphics_scene.setSceneRect(0, 0, view_width, view_height)
+        except Exception as e:
+            print(f"Error applying UI scale: {e}")
+            import traceback
+            traceback.print_exc()
     
     def save_scale_to_config(self, scale):
         """Save the current scale to config.yaml"""
@@ -599,30 +678,59 @@ class MainWindow(QtWidgets.QMainWindow):
     # ===== INVOICE TAB ====
     def init_invoice_tab(self):
         layout = QtWidgets.QVBoxLayout(self.invoice_tab)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(12)
+        
+        # ADAPTIVE LAYOUT SETTINGS
+        if self.compact_mode:
+            # Compact Mode (for 768p screens)
+            margin = 8
+            spacing = 6
+            cat_stretch = 3 # More space for available tests (Spotlight)
+            sel_stretch = 1 # Less space for selected tests (Compact)
+            table_min_h = 120
+            sel_table_min_h = 100
+            input_font_size = 10
+        else:
+            # Standard Mode (for 1080p+ screens)
+            margin = 15
+            spacing = 12
+            cat_stretch = 3
+            sel_stretch = 1
+            table_min_h = 150
+            sel_table_min_h = 120
+            input_font_size = 11
+
+        layout.setContentsMargins(margin, margin, margin, margin)
+        layout.setSpacing(spacing)
         
         # ===== TOP: CATALOGUE SECTION =====
         cat_group = QtWidgets.QGroupBox('Available Tests')
         cat_group.setObjectName('availableTestsGroup')
         cat_layout = QtWidgets.QVBoxLayout(cat_group)
+        # Compact group box changes
+        if self.compact_mode:
+            cat_layout.setContentsMargins(4, 12, 4, 4) # Tighter inside groupbox
+            cat_layout.setSpacing(4)
         
         # Search bar with button
         search_layout = QtWidgets.QHBoxLayout()
         search_label = QtWidgets.QLabel('Search:')
-        search_label.setFont(QtGui.QFont('', 11))
+        search_label.setFont(QtGui.QFont('', input_font_size))
         search_layout.addWidget(search_label)
         self.cat_search = QtWidgets.QLineEdit()
         self.cat_search.setPlaceholderText('By test name or code...')
-        self.cat_search.setFont(QtGui.QFont('', 11))
+        self.cat_search.setFont(QtGui.QFont('', input_font_size))
         self.cat_search.returnPressed.connect(self.search_invoice_catalogue)
         search_layout.addWidget(self.cat_search)
         
         # Search button (on-demand instead of auto-filter)
         self.cat_search_btn = QtWidgets.QPushButton('🔍 Search')
-        self.cat_search_btn.setStyleSheet('font-size: 14px; padding: 6px 12px; font-weight: bold;')
+        if self.compact_mode:
+            self.cat_search_btn.setStyleSheet('font-size: 11px; padding: 4px 8px; font-weight: bold;')
+        else:
+            self.cat_search_btn.setStyleSheet('font-size: 14px; padding: 6px 12px; font-weight: bold;')
+            
         self.cat_search_btn.clicked.connect(self.search_invoice_catalogue)
-        self.cat_search_btn.setMinimumWidth(100)
+        self.cat_search_btn.setMinimumWidth(80 if self.compact_mode else 100)
         search_layout.addWidget(self.cat_search_btn)
         
         self.cat_status = QtWidgets.QLabel('Ready')
@@ -631,9 +739,13 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Refresh button for catalogue
         self.cat_refresh_btn = QtWidgets.QPushButton('🔄 Refresh')
-        self.cat_refresh_btn.setStyleSheet('font-size: 14px; padding: 6px 12px; font-weight: bold;')
+        if self.compact_mode:
+            self.cat_refresh_btn.setStyleSheet('font-size: 11px; padding: 4px 8px; font-weight: bold;')
+        else:
+            self.cat_refresh_btn.setStyleSheet('font-size: 14px; padding: 6px 12px; font-weight: bold;')
+            
         self.cat_refresh_btn.clicked.connect(self.refresh_invoice_catalogue)
-        self.cat_refresh_btn.setMinimumWidth(100)
+        self.cat_refresh_btn.setMinimumWidth(80 if self.compact_mode else 100)
         search_layout.addWidget(self.cat_refresh_btn)
         
         cat_layout.addLayout(search_layout)
@@ -644,15 +756,19 @@ class MainWindow(QtWidgets.QMainWindow):
         # Standard Tests tab
         standard_tab = QtWidgets.QWidget()
         standard_layout = QtWidgets.QVBoxLayout(standard_tab)
+        if self.compact_mode:
+            standard_layout.setContentsMargins(4, 4, 4, 4)
+            standard_layout.setSpacing(4)
+            
         self.cat_table = QtWidgets.QTableWidget()
         self.cat_table.setColumnCount(5)
         self.cat_table.setHorizontalHeaderLabels(['Code', 'Name', 'Fasting', 'Fees', 'Action'])
         self.cat_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.cat_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.cat_table.setMinimumHeight(150) # Reduced from 300
+        self.cat_table.setMinimumHeight(table_min_h) 
         self.cat_table.setAlternatingRowColors(True)
         font = self.cat_table.font()
-        font.setPointSize(11)
+        font.setPointSize(input_font_size)
         self.cat_table.setFont(font)
         self.cat_table.setColumnWidth(2, 70)
         self.cat_table.setColumnWidth(4, 80)
@@ -666,11 +782,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # Special Tests tab
         special_tab = QtWidgets.QWidget()
         special_layout = QtWidgets.QVBoxLayout(special_tab)
-        special_layout.setSpacing(10)
+        special_layout.setSpacing(spacing)
         
         # Toggle button for adding new special tests
         self.toggle_add_test_btn = QtWidgets.QPushButton('▶ Add New Special Test')
-        MainWindow.style_button_with_dynamic_spacing(self.toggle_add_test_btn, font_size=11, padding="6px 12px")
+        MainWindow.style_button_with_dynamic_spacing(self.toggle_add_test_btn, font_size=input_font_size, padding="4px 8px" if self.compact_mode else "6px 12px")
         self.toggle_add_test_btn.setCheckable(True)
         self.toggle_add_test_btn.setStyleSheet("text-align: left; font-weight: bold;")
         special_layout.addWidget(self.toggle_add_test_btn)
@@ -731,10 +847,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.special_table.setHorizontalHeaderLabels(['Name', 'Description', 'Fees', 'Action'])
         self.special_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.special_table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.special_table.setMinimumHeight(150) # Reduced from 300
+        self.special_table.setMinimumHeight(table_min_h)
         self.special_table.setAlternatingRowColors(True)
         font = self.special_table.font()
-        font.setPointSize(11)
+        font.setPointSize(input_font_size)
         self.special_table.setFont(font)
         self.special_table.setColumnWidth(3, 80)
         self.special_table.setStyleSheet("""
@@ -746,12 +862,14 @@ class MainWindow(QtWidgets.QMainWindow):
         
         cat_layout.addWidget(self.cat_tabs)
         
-        layout.addWidget(cat_group, 3)
+        layout.addWidget(cat_group, cat_stretch)
         
         # ===== MIDDLE: PATIENT & SELECTED TESTS (side by side) =====
         middle = QtWidgets.QWidget()
         middle_layout = QtWidgets.QHBoxLayout(middle)
         middle_layout.setSpacing(10)
+        if self.compact_mode:
+            middle_layout.setContentsMargins(0, 0, 0, 0)
         
         # Left: Patient Details (heavily scaled down)
         patient_group = QtWidgets.QGroupBox('Patient Details')
@@ -776,7 +894,7 @@ class MainWindow(QtWidgets.QMainWindow):
         patient_layout.addLayout(lookup_layout)
         
         self.inv_patient_info = QtWidgets.QLabel('Not Selected')
-        self.inv_patient_info.setStyleSheet('font-size: 11px; font-weight: 500; line-height: 1.4;')
+        self.inv_patient_info.setStyleSheet('font-size: 13px; font-weight: bold; line-height: 1.4; color: #333;')
         self.inv_patient_info.setWordWrap(True)
         patient_layout.addWidget(self.inv_patient_info)
         patient_layout.addStretch()
@@ -786,77 +904,106 @@ class MainWindow(QtWidgets.QMainWindow):
         # Right: Selected Tests
         tests_group = QtWidgets.QGroupBox('Selected Tests')
         tests_layout = QtWidgets.QVBoxLayout(tests_group)
+        if self.compact_mode:
+            tests_layout.setContentsMargins(4, 12, 4, 4)
+            
         self.inv_items_table = QtWidgets.QTableWidget()
         self.inv_items_table.setObjectName('yellowTable')
         self.inv_items_table.setColumnCount(3)
         self.inv_items_table.setHorizontalHeaderLabels(['Name', 'Fees', 'Action'])
-        self.inv_items_table.setMinimumHeight(120) # Reduced from 200
+        self.inv_items_table.setMinimumHeight(sel_table_min_h) 
         self.inv_items_table.setAlternatingRowColors(True)
         self.inv_items_table.horizontalHeader().setStretchLastSection(False)
         self.inv_items_table.setColumnWidth(2, 80)
         # Increase font size
         font = self.inv_items_table.font()
-        font.setPointSize(11)
+        font.setPointSize(input_font_size)
         self.inv_items_table.setFont(font)
         tests_layout.addWidget(self.inv_items_table)
         middle_layout.addWidget(tests_group, 2)
         
-        layout.addWidget(middle, 1)
+        layout.addWidget(middle, sel_stretch)
         
         # ===== BOTTOM: BILLING & GENERATE =====
+        # ===== BOTTOM: BILLING & GENERATE =====
         billing_group = QtWidgets.QGroupBox('Billing')
-        billing_layout = QtWidgets.QFormLayout(billing_group)
+        # Use Grid Layout for compact row
+        billing_layout = QtWidgets.QGridLayout(billing_group)
+        billing_layout.setContentsMargins(10, 8, 10, 8)
+        billing_layout.setHorizontalSpacing(15)
         
+        # --- Column 0 & 1: Inputs ---
         self.inv_discount = QtWidgets.QDoubleSpinBox()
         self.inv_discount.setMaximum(100)
         self.inv_discount.setSuffix('%')
-        self.inv_discount.setFont(QtGui.QFont('', 11))
+        self.inv_discount.setFont(QtGui.QFont('', input_font_size))
+        self.inv_discount.setMinimumWidth(110) # Expanded "by a lot"
         self.inv_discount.valueChanged.connect(self.inv_recalc)
         
-        self.inv_home_check = QtWidgets.QCheckBox('Home Collection')
-        self.inv_home_check.setFont(QtGui.QFont('', 11))
+        self.inv_home_check = QtWidgets.QCheckBox('Home Coll.')
+        self.inv_home_check.setFont(QtGui.QFont('', input_font_size))
         self.inv_home_check.toggled.connect(self.inv_home_toggled)
         
         self.inv_home_fee = QtWidgets.QDoubleSpinBox()
         self.inv_home_fee.setMaximum(100000)
-        self.inv_home_fee.setFont(QtGui.QFont('', 11))
+        self.inv_home_fee.setFont(QtGui.QFont('', input_font_size))
+        self.inv_home_fee.setMinimumWidth(110) # Expanded "by a lot"
         self.inv_home_fee.setEnabled(False)
         self.inv_home_fee.valueChanged.connect(self.inv_recalc)
         
-        billing_layout.addRow('Discount %:', self.inv_discount)
-        billing_layout.addRow(self.inv_home_check)
-        billing_layout.addRow('Home Fee:', self.inv_home_fee)
+        # Row 0: Discount
+        billing_layout.addWidget(QtWidgets.QLabel('Disc %:'), 0, 0)
+        billing_layout.addWidget(self.inv_discount, 0, 1)
         
-        # Summary labels
-        summary_layout = QtWidgets.QHBoxLayout()
-        self.inv_subtotal = QtWidgets.QLabel('Subtotal: ₹0.00')
-        self.inv_subtotal.setStyleSheet('font-size: 13px; font-weight: 500;')
-        self.inv_disc_amt = QtWidgets.QLabel('Discount: -₹0.00')
-        self.inv_disc_amt.setStyleSheet('font-size: 13px; font-weight: 500;')
-        self.inv_roundoff = QtWidgets.QLabel('Round Off: ₹0.00')
-        self.inv_roundoff.setStyleSheet('font-size: 13px; font-weight: 500;')
-        self.inv_total = QtWidgets.QLabel('TOTAL: ₹0.00')
-        self.inv_total.setStyleSheet('font-weight: bold; font-size: 15px;')
+        # Row 1: Home Check
+        billing_layout.addWidget(self.inv_home_check, 1, 0, 1, 2)
+        
+        # Row 2: Home Fee
+        billing_layout.addWidget(QtWidgets.QLabel('Fee:'), 2, 0)
+        billing_layout.addWidget(self.inv_home_fee, 2, 1)
+        
+        # --- Column 2: Summary (Vertical) ---
+        summary_layout = QtWidgets.QVBoxLayout()
+        summary_layout.setSpacing(2)
+        self.inv_subtotal = QtWidgets.QLabel('Sub: ₹0')
+        self.inv_subtotal.setStyleSheet('font-size: 11px; color: #555;')
+        self.inv_disc_amt = QtWidgets.QLabel('Disc: -₹0')
+        self.inv_disc_amt.setStyleSheet('font-size: 11px; color: #d32f2f;')
+        self.inv_total = QtWidgets.QLabel('Total: ₹0')
+        self.inv_total.setStyleSheet('font-weight: bold; font-size: 14px; color: #2e7d32;')
         
         summary_layout.addWidget(self.inv_subtotal)
         summary_layout.addWidget(self.inv_disc_amt)
-        summary_layout.addWidget(self.inv_roundoff)
-        summary_layout.addStretch()
         summary_layout.addWidget(self.inv_total)
-        billing_layout.addRow(summary_layout)
         
-        layout.addWidget(billing_group)
+        billing_layout.addLayout(summary_layout, 0, 2, 3, 1)
         
-        # Generate button with dynamic spacing
-        btn_layout = QtWidgets.QHBoxLayout()
-        btn_layout.addStretch()
-        self.inv_gen_btn = QtWidgets.QPushButton('Generate PDF Invoice')
-        MainWindow.style_button_with_dynamic_spacing(self.inv_gen_btn, font_size=12, padding="10px 20px")
+        # --- Column 3: Spacer ---
+        billing_layout.setColumnStretch(3, 1)
+        
+        # --- Column 4: Generate Button ---
+        self.inv_gen_btn = QtWidgets.QPushButton('Generate\nInvoice')
+        # Square-ish styling
+        self.inv_gen_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0078D4; 
+                color: white; 
+                font-size: 13px; 
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 4px;
+                text-align: center;
+            }
+            QPushButton:hover { background-color: #0063b1; }
+            QPushButton:disabled { background-color: #cccccc; }
+        """)
+        self.inv_gen_btn.setFixedSize(90, 80)
         self.inv_gen_btn.clicked.connect(self.inv_generate)
         self.inv_gen_btn.setEnabled(False)
-        btn_layout.addWidget(self.inv_gen_btn)
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
+        
+        billing_layout.addWidget(self.inv_gen_btn, 0, 4, 3, 1)
+        
+        layout.addWidget(billing_group)
         
         self.inv_current_patient = None
         self.inv_selected_tests = {}
@@ -1827,6 +1974,49 @@ class MainWindow(QtWidgets.QMainWindow):
                 if file.endswith(".db"):
                     shutil.copy2(os.path.join(db_dir, file), os.path.join(backup_path, file))
                     count += 1
+            
+            # --- Backup Config & Logos ---
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # app -> root
+            if getattr(sys, 'frozen', False):
+                 project_root = os.path.dirname(sys.executable)
+                 
+            conf_path = get_config_path()
+            if os.path.exists(conf_path):
+                shutil.copy2(conf_path, os.path.join(backup_path, "config.yaml"))
+                count += 1
+                
+                # Check for custom logos in config
+                try:
+                    with open(conf_path, 'r', encoding='utf-8') as f:
+                        config = yaml.safe_load(f) or {}
+                        
+                    logos_to_backup = []
+                    if 'BRANDING_LOGO' in config and config['BRANDING_LOGO']:
+                        logos_to_backup.append(config['BRANDING_LOGO'])
+                    if 'REPORT_LOGO' in config and config['REPORT_LOGO']:
+                        logos_to_backup.append(config['REPORT_LOGO'])
+                        
+                    if logos_to_backup:
+                        logo_backup_dir = os.path.join(backup_path, "logos")
+                        os.makedirs(logo_backup_dir, exist_ok=True)
+                        
+                        for logo_file in logos_to_backup:
+                            # Try to resolve path (could be absolute or relative to assets)
+                            src_path = None
+                            if os.path.isabs(logo_file):
+                                if os.path.exists(logo_file):
+                                    src_path = logo_file
+                            else:
+                                # Try assets dir
+                                candidate = get_asset_path(logo_file)
+                                if os.path.exists(candidate):
+                                    src_path = candidate
+                                    
+                            if src_path:
+                                shutil.copy2(src_path, os.path.join(logo_backup_dir, os.path.basename(logo_file)))
+                                count += 1
+                except Exception as ex:
+                    print(f"Warning backing up logos: {ex}")
             
             # Create ZIP archive
             zip_path = shutil.make_archive(backup_path, 'zip', backup_path)

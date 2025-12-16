@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "PekoCMS"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Otus9051"
 #define MyAppURL "https://github.com/otus9051/pekocms"
 #define MyAppExeName "PekoCMS.exe"
