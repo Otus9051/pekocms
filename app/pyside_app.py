@@ -1,6 +1,6 @@
 import sys, os, json, webbrowser, datetime
 from typing import List, Dict, Any
-from PySide6 import QtWidgets, QtCore, QtGui
+from PySide6 import QtWidgets, QtCore, QtGui, QtSvg
 
 # Add parent directory to path for db imports
 # Add parent directory to path for db imports
@@ -43,6 +43,161 @@ else:
 INVOICE_STORAGE_DIR = get_invoice_storage_dir()
 
 
+def render_svg(svg_path, height):
+    """Render an SVG to a QPixmap at specific height for sharpness"""
+    if not os.path.exists(svg_path):
+        return None
+        
+    renderer = QtSvg.QSvgRenderer(svg_path)
+    if not renderer.isValid():
+        return None
+        
+    size = renderer.defaultSize()
+    if size.isEmpty():
+        return None
+        
+    ratio = size.width() / size.height()
+    width = int(height * ratio)
+    
+    # Create high-res pixmap (assuming standard 96dpi, or just render "large enough" for display)
+    pixmap = QtGui.QPixmap(width, height)
+    pixmap.fill(QtCore.Qt.transparent)
+    
+    painter = QtGui.QPainter(pixmap)
+    painter.setRenderHint(QtGui.QPainter.Antialiasing)
+    painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
+    renderer.render(painter)
+    painter.end()
+    
+    return pixmap
+
+
+
+
+INVOICE_STORAGE_DIR = get_invoice_storage_dir()
+
+
+class FirstTimeSetupDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Welcome to {APP_NAME} - Initial Setup")
+        self.resize(500, 550)
+        self.setup_ui()
+        
+    def setup_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(20)
+        
+        # Branding Header
+        header_layout = QtWidgets.QVBoxLayout()
+        header_layout.setAlignment(QtCore.Qt.AlignCenter)
+        
+        # Try to load logo
+        logo_label = QtWidgets.QLabel()
+        logo_path = get_asset_path(LOGO_SVG)
+        pix = render_svg(logo_path, 100) # Crisp render at 100px
+        if pix:
+            logo_label.setPixmap(pix)
+        logo_label.setAlignment(QtCore.Qt.AlignCenter)
+        header_layout.addWidget(logo_label)
+        
+        title = QtWidgets.QLabel(APP_NAME)
+        title.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {theme.PRIMARY_COLOR}; margin-top: 15px;")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        header_layout.addWidget(title)
+        
+        subtitle = QtWidgets.QLabel("First Time Setup")
+        subtitle.setStyleSheet("font-size: 16px; color: #555; margin-bottom: 20px;")
+        subtitle.setAlignment(QtCore.Qt.AlignCenter)
+        header_layout.addWidget(subtitle)
+        
+        layout.addLayout(header_layout)
+        
+        # --- Option 1: Create Admin ---
+        group_box = QtWidgets.QGroupBox("Create Admin Account")
+        group_box.setStyleSheet("QGroupBox { font-weight: bold; margin-top: 10px; }")
+        group_layout = QtWidgets.QFormLayout(group_box)
+        group_layout.setSpacing(12)
+        group_layout.setContentsMargins(15, 20, 15, 15)
+        
+        self.uname = QtWidgets.QLineEdit()
+        self.uname.setPlaceholderText("Username")
+        self.uname.setStyleSheet("padding: 8px;")
+        
+        self.pwd = QtWidgets.QLineEdit()
+        self.pwd.setPlaceholderText("Password")
+        self.pwd.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.pwd.setStyleSheet("padding: 8px;")
+        
+        self.fname = QtWidgets.QLineEdit()
+        self.fname.setPlaceholderText("Full Name")
+        self.fname.setStyleSheet("padding: 8px;")
+        
+        group_layout.addRow("Username:", self.uname)
+        group_layout.addRow("Password:", self.pwd)
+        group_layout.addRow("Full Name:", self.fname)
+        
+        self.create_btn = QtWidgets.QPushButton("Create Account & Start")
+        # Inline style because MainWindow static method might not be available relative to scope or just simpler
+        self.create_btn.setStyleSheet(f"background-color: {theme.PRIMARY_COLOR}; color: white; font-weight: bold; padding: 12px; border-radius: 4px; font-size: 14px;")
+        self.create_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.create_btn.clicked.connect(self.create_account)
+        group_layout.addRow(self.create_btn)
+        
+        layout.addWidget(group_box)
+        
+        # --- Separator ---
+        sep = QtWidgets.QLabel("- OR -")
+        sep.setAlignment(QtCore.Qt.AlignCenter)
+        sep.setStyleSheet("color: #888; font-weight: bold; margin: 10px 0;")
+        layout.addWidget(sep)
+        
+        # --- Option 2: Restore from Backup ---
+        restore_frame = QtWidgets.QFrame()
+        restore_frame.setStyleSheet("background-color: #f5f5f5; border-radius: 6px; padding: 10px;")
+        restore_layout = QtWidgets.QHBoxLayout(restore_frame)
+        
+        restore_label = QtWidgets.QLabel("Have a backup?")
+        restore_label.setStyleSheet("font-weight: 500;")
+        
+        self.restore_btn = QtWidgets.QPushButton("Restore System from Backup")
+        self.restore_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.restore_btn.setStyleSheet("background-color: #e0e0e0; border: 1px solid #ccc; padding: 6px 12px; border-radius: 4px; font-weight: bold;")
+        self.restore_btn.clicked.connect(self.restore_backup)
+        
+        restore_layout.addWidget(restore_label)
+        restore_layout.addStretch()
+        restore_layout.addWidget(self.restore_btn)
+        
+        layout.addWidget(restore_frame)
+        layout.addStretch()
+
+    def create_account(self):
+        uname = self.uname.text().strip()
+        pwd = self.pwd.text().strip()
+        fname = self.fname.text().strip()
+        
+        if not uname or not pwd:
+            QtWidgets.QMessageBox.warning(self, "Validation Error", "Username and Password are required.")
+            return
+            
+        try:
+            auth_db.create_user(uname, pwd, fname, 'admin')
+            QtWidgets.QMessageBox.information(self, "Success", "Admin account created successfully.\nStarting PekoCMS...")
+            self.accept()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Error", f"Could not create user: {str(e)}")
+
+    def restore_backup(self):
+        zip_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select Backup Archive", "", "ZIP Files (*.zip)")
+        if zip_path:
+            from app.restore_utils import restore_system_from_backup
+            success = restore_system_from_backup(zip_path, self)
+            if success:
+                # Close app to allow restart
+                QtWidgets.QApplication.quit()
+                sys.exit(0)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -98,9 +253,9 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Logo
         logo = QtWidgets.QLabel()
-        pix = QtGui.QPixmap(get_asset_path(LOGO_SVG))
-        if not pix.isNull():
-            logo.setPixmap(pix.scaledToHeight(40, QtCore.Qt.SmoothTransformation))
+        pix = render_svg(get_asset_path(LOGO_SVG), 40) # Crisp render at 40px
+        if pix:
+            logo.setPixmap(pix)
         header_layout.addWidget(logo)
         
         # Clinic name
@@ -1939,10 +2094,47 @@ class MainWindow(QtWidgets.QMainWindow):
         self.backup_btn.clicked.connect(self.adm_backup_databases)
         mg_layout.addWidget(self.backup_btn)
         
+        # Restore Section
+        mg_layout.addSpacing(20)
+        restore_label = QtWidgets.QLabel("Restore System")
+        restore_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        mg_layout.addWidget(restore_label)
+        
+        restore_info = QtWidgets.QLabel("Restores databases, configuration, and logos from a backup ZIP. WARNING: This overwrites current data.")
+        restore_info.setStyleSheet("color: #D32F2F;") # Red warning color
+        restore_info.setWordWrap(True)
+        mg_layout.addWidget(restore_info)
+        
+        self.restore_btn = QtWidgets.QPushButton("Restore from Backup")
+        MainWindow.style_button_with_dynamic_spacing(self.restore_btn, font_size=12, padding="10px 20px")
+        self.restore_btn.setStyleSheet("""
+            QPushButton { 
+                background-color: #f44336; 
+                color: white; 
+                font-weight: bold; 
+                border-radius: 4px;
+            } 
+            QPushButton:hover { background-color: #d32f2f; }
+        """)
+        self.restore_btn.clicked.connect(self.adm_restore_backup)
+        mg_layout.addWidget(self.restore_btn)
+        
         maint_layout.addWidget(maint_group)
         maint_layout.addStretch()
         
         tabs.addTab(maint_w, 'Maintenance')
+        
+    def adm_restore_backup(self):
+        """Restore system from backup via Admin Panel"""
+        zip_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select Backup Archive", "", "ZIP Files (*.zip)")
+        if zip_path:
+            from app.restore_utils import restore_system_from_backup
+            success = restore_system_from_backup(zip_path, self)
+            if success:
+                # Logic to restart or close?
+                # The helper shows a message saying app will close.
+                QtWidgets.QApplication.quit()
+                sys.exit(0)
     
     def adm_create_user(self):
         try:
@@ -3159,26 +3351,11 @@ def main():
         pass
     
     if not auth_db.check_if_any_user_exists():
-        dlg = QtWidgets.QDialog()
-        dlg.setWindowTitle('Setup')
-        layout = QtWidgets.QFormLayout(dlg)
-        uname = QtWidgets.QLineEdit()
-        pwd = QtWidgets.QLineEdit()
-        pwd.setEchoMode(QtWidgets.QLineEdit.Password)
-        fname = QtWidgets.QLineEdit()
-        btn = QtWidgets.QPushButton('Create Admin')
-        layout.addRow('Username:', uname)
-        layout.addRow('Password:', pwd)
-        layout.addRow('Full Name:', fname)
-        layout.addRow(btn)
-        def setup():
-            try:
-                auth_db.create_user(uname.text(), pwd.text(), fname.text(), 'admin')
-                dlg.accept()
-            except Exception as e:
-                QtWidgets.QMessageBox.warning(dlg, 'Error', str(e))
-        btn.clicked.connect(setup)
-        dlg.exec()
+        # Show branded First Time Setup
+        setup_dlg = FirstTimeSetupDialog()
+        if setup_dlg.exec() != QtWidgets.QDialog.Accepted:
+            # User cancelled setup
+            sys.exit(0)
     
     login_win = LoginWindow()
     main_window = None
