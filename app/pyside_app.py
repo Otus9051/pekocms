@@ -3001,7 +3001,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     day_widget['checkbox'].setChecked(True)
                     day_widget['add_btn'].setEnabled(True)  # Explicitly enable button
                     for slot in day_schedule[day_idx]:
-                        self.poly_add_day_time_slot(day_idx, slot['start'], slot['end'])
+                        self._poly_add_slot_impl(day_idx, slot['start'], slot['end'])
                 else:
                     day_widget['checkbox'].setChecked(False)
                     day_widget['add_btn'].setEnabled(False)  # Explicitly disable button
