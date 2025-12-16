@@ -1124,11 +1124,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.inv_subtotal.setStyleSheet('font-size: 11px; color: #555;')
         self.inv_disc_amt = QtWidgets.QLabel('Disc: -₹0')
         self.inv_disc_amt.setStyleSheet('font-size: 11px; color: #d32f2f;')
+        self.inv_roundoff = QtWidgets.QLabel('Round Off: ₹0')
+        self.inv_roundoff.setStyleSheet('font-size: 11px; color: #555;')
         self.inv_total = QtWidgets.QLabel('Total: ₹0')
         self.inv_total.setStyleSheet('font-weight: bold; font-size: 14px; color: #2e7d32;')
         
         summary_layout.addWidget(self.inv_subtotal)
         summary_layout.addWidget(self.inv_disc_amt)
+        summary_layout.addWidget(self.inv_roundoff)
         summary_layout.addWidget(self.inv_total)
         
         billing_layout.addLayout(summary_layout, 0, 2, 3, 1)
