@@ -7,7 +7,7 @@ from packaging import version
 from PySide6 import QtCore, QtWidgets
 
 # Current App Version
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.2"
 GITHUB_REPO = "otus9051/pekocms"
 
 class UpdateCheckerThread(QtCore.QThread):
