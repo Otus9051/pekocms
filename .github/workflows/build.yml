@@ -30,7 +30,7 @@ jobs:
     - name: Generate Icon
       # Generate .ico from .png using PySide6 (installed in dependencies)
       run: |
-        python -c "from PySide6.QtGui import QImage; img = QImage('assets/logo_print.png'); img.save('assets/icon.ico')"
+        python -c "from PySide6.QtGui import QImage; img = QImage('assets/logo.svg'); img.save('assets/icon.ico')"
 
     - name: Build Executable with PyInstaller
       run: |
