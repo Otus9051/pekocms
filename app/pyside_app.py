@@ -28,10 +28,11 @@ from app.branding import (
     BUTTON_SIGN_IN, BUTTON_SHUTDOWN, BUTTON_REFRESH, BUTTON_EXPORT,
     DEFAULT_CSV_FILENAME, DEFAULT_XLSX_FILENAME,
     INVOICE_FOLDER_NAME, INVOICE_SUBDIRECTORY, PATIENT_ID_LABEL, CLINIC_NAME_PREFIX,
-    FOOTER_TEXT
+    FOOTER_TEXT, UI_SCALE
 )
 
-from app.utils import get_asset_path, get_invoice_storage_dir
+from app.utils import get_asset_path, get_invoice_storage_dir, get_config_path
+import yaml
 
 # Handle PyInstaller frozen app paths
 if getattr(sys, 'frozen', False):
@@ -112,6 +113,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.polyclinic_btn.clicked.connect(lambda: self.switch_mode('polyclinic'))
         header_layout.addWidget(self.polyclinic_btn)
         
+        # UI Scale control
+        header_layout.addSpacing(20)
+        scale_label = QtWidgets.QLabel('Scale:')
+        scale_label.setStyleSheet('font-size: 11px; font-weight: bold;')
+        header_layout.addWidget(scale_label)
+        
+        self.scale_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.scale_slider.setMinimum(50)  # 50%
+        self.scale_slider.setMaximum(150)  # 150%
+        self.scale_slider.setValue(int(UI_SCALE * 100))  # Load from config
+        self.scale_slider.setTickPosition(QtWidgets.QSlider.TicksBelow)
+        self.scale_slider.setTickInterval(25)
+        self.scale_slider.setMaximumWidth(120)
+        self.scale_slider.setStyleSheet('QSlider { margin: 0 5px; }')
+        self.scale_slider.valueChanged.connect(self.on_scale_changed)
+        header_layout.addWidget(self.scale_slider)
+        
+        self.scale_value_label = QtWidgets.QLabel(f'{int(UI_SCALE * 100)}%')
+        self.scale_value_label.setStyleSheet('font-size: 11px; font-weight: bold; min-width: 40px;')
+        header_layout.addWidget(self.scale_value_label)
+        
         # User info and logout button
         header_layout.addStretch()
         user_label = QtWidgets.QLabel(f"User: {user.get('username', 'Unknown')}")
@@ -181,6 +203,9 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.setCentralWidget(central)
         
+        # Apply initial scale from config
+        self.apply_ui_scale(UI_SCALE)
+        
         # Initialize pathology tabs
         self.init_invoice_tab()
         self.init_cms_tab()
@@ -213,6 +238,167 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Preload Special Tests
         self.preload_special_tests()
+    
+    def on_scale_changed(self, value):
+        """Handle scale slider changes"""
+        scale = value / 100.0
+        self.scale_value_label.setText(f'{value}%')
+        self.apply_ui_scale(scale)
+        self.save_scale_to_config(scale)
+    
+    class ResizingGraphicsView(QtWidgets.QGraphicsView):
+        def __init__(self, scene, parent=None):
+            super().__init__(scene, parent)
+            self.setFrameShape(QtWidgets.QFrame.NoFrame)
+            self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            self.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+            self.setRenderHint(QtGui.QPainter.Antialiasing)
+            self.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
+            self.main_window = None # Reference to main window to access scale factor
+
+        def resizeEvent(self, event):
+            super().resizeEvent(event)
+            if self.scene() and self.scene().items():
+                # Find the proxy widget (should be the first item)
+                proxy = self.scene().items()[0]
+                if isinstance(proxy, QtWidgets.QGraphicsProxyWidget):
+                    scale = getattr(self.main_window, 'current_scale', 1.0) if self.main_window else 1.0
+                    
+                    # Target: We want the widget (scaled) to fit the viewport exactly.
+                    # Visual Size = Viewport Size
+                    # Logical Widget Size = Viewport Size / Scale
+                    
+                    vw = self.viewport().width()
+                    vh = self.viewport().height()
+                    
+                    new_width = vw / scale
+                    new_height = vh / scale
+                    
+                    # Update widget size (Logical)
+                    if proxy.widget():
+                        proxy.widget().setFixedSize(int(new_width), int(new_height))
+                        
+                    # Update scene rect (Visual)
+                    # The scene rect should match the viewport size because the Item's transform 
+                    # shrinks it to that visual size.
+                    self.scene().setSceneRect(0, 0, vw, vh)
+
+    def apply_ui_scale(self, scale):
+        """Apply UI scale transformation to central widget using QGraphicsView"""
+        # Store the scale for reference
+        self.current_scale = scale
+        
+        # Get the current central widget
+        current_central = self.centralWidget()
+        if not current_central:
+            return
+            
+        # Check if we are already in scaled mode (current_central is our wrapper)
+        is_already_scaled = isinstance(current_central, MainWindow.ResizingGraphicsView)
+        
+        if scale == 1.0:
+            if is_already_scaled:
+                # Unwrap: Retrieve the original widget
+                proxy = current_central.scene().items()[-1] # Usually items are stacked, check properly
+                # Better: usage referencing existing stored widget
+                if hasattr(self, '_original_central_widget') and self._original_central_widget:
+                    # Restore original - Explicitly reparent to self to ensure ownership is claimed
+                    self.setCentralWidget(self._original_central_widget)
+                    self._original_central_widget.setFixedSize(QtWidgets.QWIDGETSIZE_MAX, QtWidgets.QWIDGETSIZE_MAX) 
+                    self._original_central_widget.updateGeometry()
+                    
+                    # Clean up the graphics view infrastructure
+                    # Important: Proxy widget might try to delete the widget if not carefully detached
+                    # But setCentralWidget reparents it, so it should be fine.
+                    # We'll just be extra careful with exception handling during cleanup
+                    try:
+                        if hasattr(self, 'proxy_widget'):
+                            # Ensure proxy doesn't think it owns the widget anymore (though reparenting should handle this)
+                            pass 
+                        current_central.deleteLater()
+                        if hasattr(self, 'graphics_scene'):
+                             self.graphics_scene.deleteLater()
+                             del self.graphics_scene
+                    except RuntimeError:
+                        pass
+                    
+                    if hasattr(self, 'proxy_widget'):
+                        del self.proxy_widget
+                        
+                    del self._original_central_widget
+        else:
+            # We want to scale
+            if not is_already_scaled:
+                # FIRST: Detach the original central widget from MainWindow so it can be embedded
+                # takeCentralWidget passes ownership to us
+                self._original_central_widget = self.takeCentralWidget()
+                
+                if not self._original_central_widget:
+                    # Should not happen if we checked centralWidget() before, but safety first
+                    # Attempt to recover by using the reference we got earlier, assuming we can reparent it
+                    # But if takeCentralWidget returned None, we might be in trouble.
+                    self._original_central_widget = current_central
+
+                # Create graphics view setup
+                self.graphics_scene = QtWidgets.QGraphicsScene()
+                self.graphics_view = self.ResizingGraphicsView(self.graphics_scene, self)
+                self.graphics_view.main_window = self
+                
+                # Retrieve background color from original widget or window to fill gaps
+                bg_color = self.palette().color(QtGui.QPalette.Window)
+                self.graphics_view.setBackgroundBrush(bg_color)
+                
+                # Add the original widget as a proxy
+                self.proxy_widget = self.graphics_scene.addWidget(self._original_central_widget)
+                
+                # Set view as central
+                self.setCentralWidget(self.graphics_view)
+            else:
+                # Already scaled, just updating scale factor
+                self.graphics_view = current_central
+                # Find proxy
+                for item in self.graphics_scene.items():
+                    if isinstance(item, QtWidgets.QGraphicsProxyWidget):
+                        self.proxy_widget = item
+                        break
+            
+            # Apply transformation
+            transform = QtGui.QTransform()
+            transform.scale(scale, scale)
+            self.proxy_widget.setTransform(transform)
+            
+            # Force a resize event to layout correctly with new scale
+            # We manually trigger the logic from resizeEvent
+            view_width = self.graphics_view.viewport().width()
+            view_height = self.graphics_view.viewport().height()
+            
+            if view_width > 0 and view_height > 0:
+                new_width = view_width / scale
+                new_height = view_height / scale
+                self._original_central_widget.setFixedSize(int(new_width), int(new_height))
+                # VISUAL size matches viewport
+                self.graphics_scene.setSceneRect(0, 0, view_width, view_height)
+    
+    def save_scale_to_config(self, scale):
+        """Save the current scale to config.yaml"""
+        try:
+            config_path = get_config_path()
+            
+            # Load existing config
+            config = {}
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = yaml.safe_load(f) or {}
+            
+            # Update scale
+            config['UI_SCALE'] = scale
+            
+            # Save back to file
+            with open(config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+        except Exception as e:
+            print(f"Warning: Could not save UI scale to config: {e}")
 
     def preload_special_tests(self):
         """Load special tests into memory on startup"""
@@ -297,8 +483,12 @@ class MainWindow(QtWidgets.QMainWindow):
     
     def _update_catalogue_status(self, status_msg):
         """Update catalogue status label"""
-        if hasattr(self, 'cat_status'):
-            self.cat_status.setText(status_msg)
+        try:
+            if hasattr(self, 'cat_status'):
+                self.cat_status.setText(status_msg)
+        except RuntimeError:
+            # Widget might be deleted during shutdown or scaling update
+            pass
     
     def refresh_invoice_catalogue(self):
         
@@ -327,9 +517,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.progress_dialog.close()
         
         # Catalogue is now cached and ready for search
-        self.cat_status.setText(f'Ready - {len(cat) if cat else 0} tests cached')
-        
-        QtWidgets.QMessageBox.information(self, 'Success', f'Catalogue refreshed: {len(cat)} tests loaded')
+        try:
+            if hasattr(self, 'cat_status'):
+                self.cat_status.setText(f'Ready - {len(cat) if cat else 0} tests cached')
+            
+            QtWidgets.QMessageBox.information(self, 'Success', f'Catalogue refreshed: {len(cat)} tests loaded')
+        except RuntimeError:
+            pass
         
         # Clean up thread
         if hasattr(self, 'invoice_refresh_thread'):

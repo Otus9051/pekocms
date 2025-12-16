@@ -1,27 +1,14 @@
-
-# ==========================================
-# PekoCMS - Configuration File
-# ==========================================
-
-# --- Branding ---
-APP_NAME: "PekoCMS"
-CLINIC_NAME: "PekoCMS"
-CLINIC_NAME_FORMAL: "PekoCMS"
-CLINIC_ADDRESS: "Pekoland"
-CLINIC_CONTACT: "+1 (234)-567-8901"
-FOOTER_TEXT: "Made by Otus9051 | Powered by PekoCMS"
-PATIENT_ID_PREFIX: "PEK"
-
-# --- Assets ---
-# Logo settings (files must exist in assets/ directory)
-LOGO_SVG: "logo.svg"
-LOGO_PNG: "logo_print.png"
-
-# --- Report Settings ---
-REPORT_DELIVERY_TIMES: "Reports will be given from 12:00 PM to 2:00 PM and 5:00 PM to 8:00 PM."
-
-# --- Theme ---
-# Primary brand color
-THEME_PRIMARY: "#0078D4"
-# Danger/Error color
-THEME_DANGER: "#D32F2F"
+APP_NAME: PekoCMS
+CLINIC_ADDRESS: Pekoland
+CLINIC_CONTACT: +1 (234)-567-8901
+CLINIC_NAME: PekoCMS
+CLINIC_NAME_FORMAL: PekoCMS
+FOOTER_TEXT: Made by Otus9051 | Powered by PekoCMS
+LOGO_PNG: logo_print.png
+LOGO_SVG: logo.svg
+PATIENT_ID_PREFIX: PEK
+REPORT_DELIVERY_TIMES: Reports will be given from 12:00 PM to 2:00 PM and 5:00 PM
+  to 8:00 PM.
+THEME_DANGER: '#D32F2F'
+THEME_PRIMARY: '#0078D4'
+UI_SCALE: 0.7

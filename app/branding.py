@@ -27,6 +27,7 @@ config = {
     "LOGO_PNG": "logo_print.png",
     "REPORT_DELIVERY_TIMES": "Reports will be given from 12:00 PM to 2:00 PM and 5:00 PM to 8:00 PM.",
     "PATIENT_ID_PREFIX": "PEK",
+    "UI_SCALE": 1.0,
 }
 
 # Load config.yaml if it exists
@@ -227,3 +228,11 @@ def get_invoice_folder_path() -> str:
     import os
     home = os.path.expanduser("~")
     return os.path.join(home, INVOICE_FOLDER_NAME, INVOICE_SUBDIRECTORY)
+
+
+# ============================================================================
+# UI SETTINGS
+# ============================================================================
+
+# UI Scale factor (0.5 to 1.5, default 1.0)
+UI_SCALE = config.get("UI_SCALE", 1.0)
